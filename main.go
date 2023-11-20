@@ -3,8 +3,10 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
+	"regexp"
+	"strings"
 	"time"
 
 	"golang.org/x/exp/slices"
@@ -18,11 +20,11 @@ import (
 const favoriteKey = "favorites"
 
 func main() {
-	goLabData, err := getData("https://golab.io/_next/data/eKsW0aSFaA1iGmNQIYfTS/schedule.json")
+	goLabData, err := getData("https://golab.io/schedule")
 	if err != nil {
 		panic(err)
 	}
-	rustLabData, err := getData("https://rustlab.it/_next/data/ckslXSoP6c_dW_pp_Zarl/schedule.json")
+	rustLabData, err := getData("https://rustlab.it/schedule")
 	if err != nil {
 		panic(err)
 	}
@@ -95,6 +97,10 @@ func (s *State) toggleFavorite(d day, list *widget.List) func(id widget.ListItem
 }
 
 type pageData struct {
+	Props props `json:"props"`
+}
+
+type props struct {
 	PageProps pageProps `json:"pageProps"`
 }
 
@@ -126,15 +132,29 @@ func getData(scheduleURL string) ([]day, error) {
 	}
 	defer resp.Body.Close()
 
-	scheduleJSON, err := ioutil.ReadAll(resp.Body)
+	scheduleHtml, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+
+	scheduleJson, err := extractJSON(string(scheduleHtml))
 	if err != nil {
 		return nil, err
 	}
 
 	var data pageData
-	if err := json.Unmarshal(scheduleJSON, &data); err != nil {
+	if err := json.Unmarshal([]byte(scheduleJson), &data); err != nil {
 		return nil, err
 	}
 
-	return data.PageProps.Edition.Days, nil
+	return data.Props.PageProps.Edition.Days, nil
+}
+
+func extractJSON(htmlString string) (string, error) {
+	re := regexp.MustCompile(`<script id="__NEXT_DATA__" type="application/json">(.*?)</script>`)
+	match := re.FindStringSubmatch(htmlString)
+	if len(match) < 2 {
+		return "", nil // or return an error
+	}
+	return strings.TrimSpace(match[1]), nil
 }
