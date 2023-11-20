@@ -11,13 +11,18 @@ import (
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
+	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
 )
 
 const favoriteKey = "favorites"
 
 func main() {
-	data, err := getData()
+	goLabData, err := getData("https://golab.io/_next/data/eKsW0aSFaA1iGmNQIYfTS/schedule.json")
+	if err != nil {
+		panic(err)
+	}
+	rustLabData, err := getData("https://rustlab.it/_next/data/ckslXSoP6c_dW_pp_Zarl/schedule.json")
 	if err != nil {
 		panic(err)
 	}
@@ -30,9 +35,13 @@ func main() {
 		favorites: a.Preferences().StringListWithFallback(favoriteKey, []string{}),
 	}
 
-	daysView := widget.NewAccordion(state.buildDaysView(data)...)
+	tabs := container.NewAppTabs(
+		container.NewTabItem("GoLab", state.buildDaysView(goLabData)),
+		container.NewTabItem("RustLab", state.buildDaysView(rustLabData)),
+	)
+	tabs.SetTabLocation(container.TabLocationLeading)
 
-	w.SetContent(daysView)
+	w.SetContent(tabs)
 	w.ShowAndRun()
 }
 
@@ -41,7 +50,7 @@ type State struct {
 	favorites []string
 }
 
-func (s State) buildDaysView(data []day) []*widget.AccordionItem {
+func (s *State) buildDaysView(data []day) *widget.Accordion {
 	dayViews := []*widget.AccordionItem{}
 	for _, day := range data {
 		day := day
@@ -63,14 +72,14 @@ func (s State) buildDaysView(data []day) []*widget.AccordionItem {
 
 		dayViews = append(dayViews, widget.NewAccordionItem(day.Title, list))
 	}
-	return dayViews
+	return widget.NewAccordion(dayViews...)
 }
 
-func (s State) isFavorite(id string) bool {
+func (s *State) isFavorite(id string) bool {
 	return slices.Contains(s.favorites, id)
 }
 
-func (s State) toggleFavorite(d day, list *widget.List) func(id widget.ListItemID) {
+func (s *State) toggleFavorite(d day, list *widget.List) func(id widget.ListItemID) {
 	return func(id widget.ListItemID) {
 		recordId := d.Schedule[id].Id
 		if slices.Contains(s.favorites, recordId) {
@@ -110,8 +119,7 @@ type Record struct {
 	Text              string    `json:"text"`
 }
 
-func getData() ([]day, error) {
-	scheduleURL := "https://golab.io/_next/data/eKsW0aSFaA1iGmNQIYfTS/schedule.json"
+func getData(scheduleURL string) ([]day, error) {
 	resp, err := http.Get(scheduleURL)
 	if err != nil {
 		return nil, err
