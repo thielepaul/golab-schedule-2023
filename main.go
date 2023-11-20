@@ -14,6 +14,77 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
+const favoriteKey = "favorites"
+
+func main() {
+	data, err := getData()
+	if err != nil {
+		panic(err)
+	}
+
+	a := app.NewWithID("de.thielepaul.golab2023")
+	w := a.NewWindow("GoLab 2023 Schedule")
+
+	state := State{
+		app:       a,
+		favorites: a.Preferences().StringListWithFallback(favoriteKey, []string{}),
+	}
+
+	daysView := widget.NewAccordion(state.buildDaysView(data)...)
+
+	w.SetContent(daysView)
+	w.ShowAndRun()
+}
+
+type State struct {
+	app       fyne.App
+	favorites []string
+}
+
+func (s State) buildDaysView(data []day) []*widget.AccordionItem {
+	dayViews := []*widget.AccordionItem{}
+	for _, day := range data {
+		day := day
+		list := widget.NewList(
+			func() int {
+				return len(day.Schedule)
+			},
+			func() fyne.CanvasObject {
+				return widget.NewLabel("loading...")
+			},
+			func(id widget.ListItemID, o fyne.CanvasObject) {
+				text := fmt.Sprint(day.Schedule[id].Time.Local().Format("15:04"), " - ", day.Schedule[id].Title)
+				if s.isFavorite(day.Schedule[id].Id) {
+					text = fmt.Sprint("⭐ ", text)
+				}
+				o.(*widget.Label).SetText(text)
+			})
+		list.OnSelected = s.toggleFavorite(day, list)
+
+		dayViews = append(dayViews, widget.NewAccordionItem(day.Title, list))
+	}
+	return dayViews
+}
+
+func (s State) isFavorite(id string) bool {
+	return slices.Contains(s.favorites, id)
+}
+
+func (s State) toggleFavorite(d day, list *widget.List) func(id widget.ListItemID) {
+	return func(id widget.ListItemID) {
+		recordId := d.Schedule[id].Id
+		if slices.Contains(s.favorites, recordId) {
+			s.favorites = slices.Delete(s.favorites, slices.Index(s.favorites, recordId), slices.Index(s.favorites, recordId)+1)
+		} else {
+			s.favorites = append(s.favorites, recordId)
+		}
+		s.app.Preferences().SetStringList(favoriteKey, s.favorites)
+		list.RefreshItem(id)
+		time.Sleep(100 * time.Millisecond)
+		list.Unselect(id)
+	}
+}
+
 type pageData struct {
 	PageProps pageProps `json:"pageProps"`
 }
@@ -39,66 +110,23 @@ type Record struct {
 	Text              string    `json:"text"`
 }
 
-const favoriteKey = "favorites"
-
-var a fyne.App
-
-func main() {
-	scheduleUrl := "https://golab.io/_next/data/eKsW0aSFaA1iGmNQIYfTS/schedule.json"
-	scheduleReq, err := http.Get(scheduleUrl)
+func getData() ([]day, error) {
+	scheduleURL := "https://golab.io/_next/data/eKsW0aSFaA1iGmNQIYfTS/schedule.json"
+	resp, err := http.Get(scheduleURL)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
-	scheduleJson, err := ioutil.ReadAll(scheduleReq.Body)
+	defer resp.Body.Close()
+
+	scheduleJSON, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
-	scheduleReq.Body.Close()
 
 	var data pageData
-	if err := json.Unmarshal(scheduleJson, &data); err != nil {
-		panic(err)
+	if err := json.Unmarshal(scheduleJSON, &data); err != nil {
+		return nil, err
 	}
 
-	a = app.NewWithID("de.thielepaul.golab2023")
-	w := a.NewWindow("Hello World")
-	a.Preferences()
-
-	favorites := a.Preferences().StringListWithFallback(favoriteKey, []string{})
-
-	dayViews := []*widget.AccordionItem{}
-	for _, day := range data.PageProps.Edition.Days {
-		day := day
-		list := widget.NewList(
-			func() int {
-				return len(day.Schedule)
-			},
-			func() fyne.CanvasObject {
-				return widget.NewLabel("template")
-			},
-			func(i widget.ListItemID, o fyne.CanvasObject) {
-				text := fmt.Sprint(day.Schedule[i].Time.Local().Format("15:04"), " - ", day.Schedule[i].Title)
-				if slices.Contains(favorites, day.Schedule[i].Id) {
-					text = fmt.Sprint("⭐ ", text)
-				}
-				o.(*widget.Label).SetText(text)
-			})
-		list.OnSelected = func(id widget.ListItemID) {
-			recordId := day.Schedule[id].Id
-			if slices.Contains(favorites, recordId) {
-				favorites = slices.Delete(favorites, slices.Index(favorites, recordId), slices.Index(favorites, recordId)+1)
-			} else {
-				favorites = append(favorites, recordId)
-			}
-			a.Preferences().SetStringList(favoriteKey, favorites)
-			list.RefreshItem(id)
-		}
-
-		dayViews = append(dayViews, widget.NewAccordionItem(day.Title, list))
-	}
-
-	daysView := widget.NewAccordion(dayViews...)
-
-	w.SetContent(daysView)
-	w.ShowAndRun()
+	return data.PageProps.Edition.Days, nil
 }
